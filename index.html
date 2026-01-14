@@ -28,6 +28,28 @@
     <main class="main">
       <!-- Home -->
       <section id="view-home" class="view active" aria-label="ホーム">
+        <!-- QR SCANNER START -->
+        <div class="card qr-card" aria-label="QRコード読み取り">
+          <div class="card-title">QRコード読み取り</div>
+
+          <div class="qr-actions">
+            <button id="qr_btnStart" class="btn btn-primary qr-btn" type="button">開始</button>
+            <button id="qr_btnStop" class="btn btn-secondary qr-btn" type="button" disabled>停止</button>
+          </div>
+
+          <div id="qr_videoWrap" class="qr-video-wrap hidden">
+            <video id="qr_video" class="qr-video" muted playsinline></video>
+          </div>
+
+          <div class="qr-result">
+            <div class="small">読み取り結果</div>
+            <div id="qr_resultText" class="mono qr-result-text">-</div>
+            <button id="qr_btnOpen" class="btn btn-primary qr-btn hidden" type="button">開く</button>
+          </div>
+
+          <p id="qr_msg" class="small"></p>
+        </div>
+        <!-- QR SCANNER END -->
         <div class="hero">
           <div class="mascot" aria-hidden="true">
             <!-- Simple "emergency character" (lifebuoy + heart) -->
@@ -342,6 +364,9 @@
     </main>
   </div>
 
+  <!-- QR SCANNER START -->
+  <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js" crossorigin="anonymous"></script>
+  <!-- QR SCANNER END -->
   <script src="script.js"></script>
 </body>
 </html>

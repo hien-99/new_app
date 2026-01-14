@@ -597,3 +597,47 @@ textarea{ min-height: 86px; resize: vertical; }
   max-width: 260px;
   line-height:1.35;
 }
+
+/* QR SCANNER START */
+.qr-card{
+  margin-bottom: 12px;
+}
+
+.qr-actions{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.qr-btn{
+  font-size: 16px;
+  padding: 12px 12px;
+}
+
+.qr-video-wrap{
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(16,42,67,.10);
+  background: rgba(16,42,67,.04);
+  margin-bottom: 10px;
+}
+
+.qr-video{
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.qr-result{
+  display: grid;
+  gap: 6px;
+}
+
+.qr-result-text{
+  background: rgba(16,42,67,.04);
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid rgba(16,42,67,.10);
+}
+/* QR SCANNER END */

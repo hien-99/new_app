@@ -831,6 +831,199 @@
     window.location.href = href;
   }
 
+  // QR SCANNER START
+  const qr_state = {
+    scanner: null,
+    lastText: '',
+    lastAt: 0,
+  };
+
+  function qr_setMsg(msg) {
+    const el = document.getElementById('qr_msg');
+    if (!el) return;
+    el.textContent = msg || '';
+  }
+
+  function qr_isHttpUrl(text) {
+    try {
+      const u = new URL(String(text || '').trim());
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  function qr_setResult(text) {
+    const t = String(text || '').trim();
+    const out = document.getElementById('qr_resultText');
+    if (out) out.textContent = t || '-';
+
+    const btnOpen = document.getElementById('qr_btnOpen');
+    if (btnOpen) btnOpen.classList.toggle('hidden', !qr_isHttpUrl(t));
+  }
+
+  function qr_humanizeError(err) {
+    const name = err?.name || '';
+
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return (
+        'カメラの利用が許可されませんでした。ブラウザの設定でカメラ許可をONにして、もう一度お試しください。\n' +
+        '※ Safari/Chromeで開いてください（アプリ内ブラウザでは動かない場合があります）。'
+      );
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return 'カメラが見つかりませんでした。端末にカメラがあるか確認してください。';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+      return 'カメラを起動できませんでした。他のアプリがカメラを使用中の可能性があります。';
+    }
+    if (name === 'SecurityError') {
+      return 'セキュリティの制約でカメラを利用できませんでした。HTTPSで開いてください。';
+    }
+    return (
+      '読み取りを開始できませんでした。\n' +
+      '※ Safari/Chromeで開いてください（アプリ内ブラウザでは動かない場合があります）。'
+    );
+  }
+
+  async function qr_stop({ silent = false } = {}) {
+    const btnStart = document.getElementById('qr_btnStart');
+    const btnStop = document.getElementById('qr_btnStop');
+    const videoWrap = document.getElementById('qr_videoWrap');
+    const video = document.getElementById('qr_video');
+
+    try {
+      if (qr_state.scanner) {
+        await qr_state.scanner.stop();
+        qr_state.scanner.destroy();
+        qr_state.scanner = null;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (video) {
+      try {
+        video.pause();
+      } catch {
+        // ignore
+      }
+      video.srcObject = null;
+    }
+    if (videoWrap) videoWrap.classList.add('hidden');
+    if (btnStart) btnStart.disabled = false;
+    if (btnStop) btnStop.disabled = true;
+
+    if (!silent) qr_setMsg('停止しました。');
+  }
+
+  async function qr_start() {
+    const btnStart = document.getElementById('qr_btnStart');
+    const btnStop = document.getElementById('qr_btnStop');
+    const videoWrap = document.getElementById('qr_videoWrap');
+    const video = document.getElementById('qr_video');
+
+    qr_setMsg('');
+    qr_setResult('-');
+
+    if (!video || !btnStart || !btnStop || !videoWrap) return;
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      qr_setMsg(
+        'このブラウザはカメラに対応していません。\n※ Safari/Chromeで開いてください（アプリ内ブラウザでは動かない場合があります）。'
+      );
+      return;
+    }
+
+    const QrScannerLib = window.QrScanner;
+    if (!QrScannerLib) {
+      qr_setMsg('QR読み取りライブラリの読み込みに失敗しました。通信状況を確認してください。');
+      return;
+    }
+
+    try {
+      await qr_stop({ silent: true });
+
+      // Always start by user gesture only (called from click handler)
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+      videoWrap.classList.remove('hidden');
+
+      // Worker path (CDN)
+      if (!QrScannerLib.WORKER_PATH) {
+        QrScannerLib.WORKER_PATH = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js';
+      }
+
+      qr_state.lastText = '';
+      qr_state.lastAt = 0;
+
+      qr_state.scanner = new QrScannerLib(
+        video,
+        (result) => {
+          const text = typeof result === 'string' ? result : result?.data;
+          const t = String(text || '').trim();
+          if (!t) return;
+
+          const now = Date.now();
+          if (t === qr_state.lastText && now - qr_state.lastAt < 1200) return;
+
+          qr_state.lastText = t;
+          qr_state.lastAt = now;
+          qr_setResult(t);
+        },
+        {
+          preferredCamera: 'environment',
+          highlightScanRegion: false,
+          highlightCodeOutline: false,
+        }
+      );
+
+      await qr_state.scanner.start();
+      qr_setMsg('カメラを起動しました。QRコードを映してください。');
+    } catch (err) {
+      await qr_stop({ silent: true });
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      videoWrap.classList.add('hidden');
+      qr_setMsg(qr_humanizeError(err));
+    }
+  }
+
+  function qr_init() {
+    const btnStart = document.getElementById('qr_btnStart');
+    const btnStop = document.getElementById('qr_btnStop');
+    const btnOpen = document.getElementById('qr_btnOpen');
+
+    if (!btnStart || !btnStop) return;
+
+    btnStart.addEventListener('click', () => {
+      qr_start();
+    });
+    btnStop.addEventListener('click', () => {
+      qr_stop();
+    });
+
+    btnOpen?.addEventListener('click', () => {
+      const text = document.getElementById('qr_resultText')?.textContent || '';
+      if (!qr_isHttpUrl(text)) return;
+      window.open(String(text).trim(), '_blank', 'noopener');
+    });
+
+    // Stop camera when leaving the page or app goes background
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) qr_stop({ silent: true });
+    });
+    window.addEventListener('pagehide', () => {
+      qr_stop({ silent: true });
+    });
+
+    // Stop when user starts existing flows (home buttons)
+    document.getElementById('btnStartEmergency')?.addEventListener('click', () => qr_stop({ silent: true }));
+    document.getElementById('btnStartUnsure')?.addEventListener('click', () => qr_stop({ silent: true }));
+    document.getElementById('btnAdmin')?.addEventListener('click', () => qr_stop({ silent: true }));
+  }
+  // QR SCANNER END
+
   /** =========================
    *  Admin (password-protected)
    *  ========================= */
@@ -1367,5 +1560,9 @@
 
     // If first time, show admin set screen on admin view when opened
     admin.initGate();
+
+    // QR SCANNER START
+    qr_init();
+    // QR SCANNER END
   });
 })();
