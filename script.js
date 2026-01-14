@@ -950,9 +950,7 @@
       videoWrap.classList.remove('hidden');
 
       // Worker path (CDN)
-      if (!QrScannerLib.WORKER_PATH) {
-        QrScannerLib.WORKER_PATH = 'https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner-worker.min.js';
-      }
+      QrScannerLib.WORKER_PATH = 'https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js';
 
       qr_state.lastText = '';
       qr_state.lastAt = 0;
@@ -960,7 +958,7 @@
       qr_state.scanner = new QrScannerLib(
         video,
         (result) => {
-          const text = typeof result === 'string' ? result : result?.data;
+          const text = typeof result === 'string' ? result : (result?.data ?? '');
           const t = String(text || '').trim();
           if (!t) return;
 
