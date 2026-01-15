@@ -598,24 +598,24 @@ textarea{ min-height: 86px; resize: vertical; }
   line-height:1.35;
 }
 
-/* QR SCANNER START */
-.qr-card{
+/* FEATURE START */
+.feature-card{
   margin-bottom: 12px;
 }
 
-.qr-actions{
+.feature-actions{
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-bottom: 10px;
 }
 
-.qr-btn{
+.feature-btn{
   font-size: 16px;
   padding: 12px 12px;
 }
 
-.qr-video-wrap{
+.feature-video-wrap{
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(16,42,67,.10);
@@ -623,21 +623,83 @@ textarea{ min-height: 86px; resize: vertical; }
   margin-bottom: 10px;
 }
 
-.qr-video{
+.feature-video{
   width: 100%;
   height: auto;
   display: block;
 }
 
-.qr-result{
+.feature-result{
   display: grid;
   gap: 6px;
 }
 
-.qr-result-text{
+.feature-result-text{
   background: rgba(16,42,67,.04);
   border-radius: 10px;
   padding: 10px;
   border: 1px solid rgba(16,42,67,.10);
 }
-/* QR SCANNER END */
+
+.feature-file-btn{
+  width: 100%;
+}
+
+#feature_fileInput{
+  display: none;
+}
+
+.feature-attach-row{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.feature-attach-del{
+  width: auto;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.feature-case-row{
+  display: grid;
+  grid-template-columns: 1fr 190px;
+  gap: 12px;
+  align-items: start;
+}
+
+.feature-case-side .field select,
+.feature-case-side .field input{
+  font-size: 14px;
+}
+
+.feature-map-area{
+  position: relative;
+  margin: 10px 0;
+}
+
+.feature-map-img{
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 12px;
+  border: 1px solid rgba(16,42,67,.10);
+}
+
+.feature-map-marker{
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--orange);
+  border: 3px solid #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 6px 16px rgba(0,0,0,.18);
+}
+
+@media (max-width: 460px){
+  .feature-case-row{ grid-template-columns: 1fr; }
+}
+/* FEATURE END */

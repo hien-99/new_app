@@ -733,6 +733,10 @@
     nav.show('view-emergency');
     saveSession({ ...state, nav: nav.stack });
 
+    // FEATURE START
+    feature_renderDetailMount();
+    // FEATURE END
+
     // Demo feedback
     toast('（デモ）救急要請を開始しました');
   }
@@ -757,7 +761,16 @@
 
     const subject = interpolate(s?.subjectTpl || '[命をツナグ] 連絡', vars);
     const bodyTpl = action === 'emergency' ? s?.bodyTplEmergency : s?.bodyTplObserve;
-    const body = interpolate(bodyTpl || '{person} {company} {time}', vars);
+    let body = interpolate(bodyTpl || '{person} {company} {time}', vars);
+
+    // FEATURE START
+    try {
+      const caseData = feature_state.currentCaseId ? feature_getCaseById(feature_state.currentCaseId) : null;
+      body = body + feature_buildMailAddon(caseData);
+    } catch {
+      // ignore
+    }
+    // FEATURE END
 
     return { to: buildRecipientsForAction(action), subject, body };
   }
@@ -801,6 +814,10 @@
     $('#mailSubjectPreview').textContent = state.preview.subject || '-';
     $('#mailBodyPreview').textContent = state.preview.body || '-';
 
+    // FEATURE START
+    feature_renderDetailMount();
+    // FEATURE END
+
     saveSession({ ...state, nav: nav.stack });
   }
 
@@ -825,46 +842,110 @@
   }
 
   function openMail() {
+    // FEATURE START
+    try {
+      // Ensure the latest case info is reflected at the moment of opening mail
+      const s = getSituation(state.situationId);
+      const action = state.action || s?.defaultAction || 'observe';
+      state.action = action;
+      state.preview = buildMail(action);
+    } catch {
+      // ignore
+    }
+    // FEATURE END
     const { to, subject, body } = state.preview;
     const href = mailtoLink(to, subject, body);
     // Must be user gesture; called inside click handlers
     window.location.href = href;
   }
 
-  // QR SCANNER START
-  const qr_state = {
-    scanner: null,
-    lastText: '',
-    lastAt: 0,
+  // FEATURE START
+  const FEATURE_CASES_KEY = 'inochi_cases_v1';
+  const feature_state = {
+    currentCaseId: null,
+    activeQrKey: null, // 'personal' | 'location' | null
+    qr: {
+      personal: { scanner: null },
+      location: { scanner: null },
+    },
+    mapTempTap: null,
   };
 
-  function qr_setMsg(msg) {
-    const el = document.getElementById('qr_msg');
+  const FEATURE_NAME_CANDIDATES = [
+    '山田 太郎',
+    '佐藤 花子',
+    '鈴木 次郎',
+    '高橋 三郎',
+    '田中 四郎',
+  ];
+
+  const FEATURE_LOC_DICT = {
+    機械ヤード: '/assets/maps/機械ヤード.png',
+  };
+
+  function feature_loadCases() {
+    try {
+      const raw = localStorage.getItem(FEATURE_CASES_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function feature_saveCases(cases) {
+    localStorage.setItem(FEATURE_CASES_KEY, JSON.stringify(cases || []));
+  }
+
+  function feature_getCaseById(caseId) {
+    return feature_loadCases().find((c) => c && c.id === caseId) || null;
+  }
+
+  function feature_upsertCase(next) {
+    const cases = feature_loadCases();
+    const idx = cases.findIndex((c) => c && c.id === next.id);
+    if (idx >= 0) cases[idx] = next;
+    else cases.push(next);
+    feature_saveCases(cases);
+  }
+
+  function feature_makeCase({ flowType, symptomName }) {
+    return {
+      id: uuid(),
+      createdAt: new Date().toISOString(),
+      flowType,
+      symptomName,
+      personalQrText: '',
+      locationQrValue: '',
+      locationMapResolved: '',
+      selectedName: '',
+      status: '未対応',
+      assignee: '',
+      mapTap: null,
+      attachmentsMeta: [],
+    };
+  }
+
+  function feature_ensureCurrentCase(flowType) {
+    const s = getSituation(state.situationId);
+    const symptomName = s?.label || '';
+
+    const existing = feature_state.currentCaseId ? feature_getCaseById(feature_state.currentCaseId) : null;
+    if (existing && existing.flowType === flowType && existing.symptomName === symptomName) return existing;
+
+    const created = feature_makeCase({ flowType, symptomName });
+    feature_state.currentCaseId = created.id;
+    feature_upsertCase(created);
+    return created;
+  }
+
+  function feature_setMsg(el, msg) {
     if (!el) return;
     el.textContent = msg || '';
   }
 
-  function qr_isHttpUrl(text) {
-    try {
-      const u = new URL(String(text || '').trim());
-      return u.protocol === 'http:' || u.protocol === 'https:';
-    } catch {
-      return false;
-    }
-  }
-
-  function qr_setResult(text) {
-    const t = String(text || '').trim();
-    const out = document.getElementById('qr_resultText');
-    if (out) out.textContent = t || '-';
-
-    const btnOpen = document.getElementById('qr_btnOpen');
-    if (btnOpen) btnOpen.classList.toggle('hidden', !qr_isHttpUrl(t));
-  }
-
-  function qr_humanizeError(err) {
+  function feature_humanizeCameraError(err) {
     const name = err?.name || '';
-
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
       return (
         'カメラの利用が許可されませんでした。ブラウザの設定でカメラ許可をONにして、もう一度お試しください。\n' +
@@ -880,27 +961,33 @@
     if (name === 'SecurityError') {
       return 'セキュリティの制約でカメラを利用できませんでした。HTTPSで開いてください。';
     }
-    return (
-      '読み取りを開始できませんでした。\n' +
-      '※ Safari/Chromeで開いてください（アプリ内ブラウザでは動かない場合があります）。'
-    );
+    return '読み取りを開始できませんでした。\n※ Safari/Chromeで開いてください（アプリ内ブラウザでは動かない場合があります）。';
   }
 
-  async function qr_stop({ silent = false } = {}) {
-    const btnStart = document.getElementById('qr_btnStart');
-    const btnStop = document.getElementById('qr_btnStop');
-    const videoWrap = document.getElementById('qr_videoWrap');
-    const video = document.getElementById('qr_video');
+  function feature_stopAllQr({ silent = true } = {}) {
+    feature_stopQr('personal', { silent });
+    feature_stopQr('location', { silent });
+  }
+
+  async function feature_stopQr(kind, { silent = false } = {}) {
+    const slot = feature_state.qr[kind];
+    if (!slot) return;
 
     try {
-      if (qr_state.scanner) {
-        await qr_state.scanner.stop();
-        qr_state.scanner.destroy();
-        qr_state.scanner = null;
+      if (slot.scanner) {
+        await slot.scanner.stop();
+        slot.scanner.destroy();
+        slot.scanner = null;
       }
     } catch {
       // ignore
     }
+
+    const wrap = document.getElementById(`feature_${kind}_videoWrap`);
+    const video = document.getElementById(`feature_${kind}_video`);
+    const btnStart = document.getElementById(`feature_${kind}_btnStart`);
+    const btnStop = document.getElementById(`feature_${kind}_btnStop`);
+    const msg = document.getElementById(`feature_${kind}_msg`);
 
     if (video) {
       try {
@@ -910,26 +997,64 @@
       }
       video.srcObject = null;
     }
-    if (videoWrap) videoWrap.classList.add('hidden');
+    wrap?.classList.add('hidden');
     if (btnStart) btnStart.disabled = false;
     if (btnStop) btnStop.disabled = true;
 
-    if (!silent) qr_setMsg('停止しました。');
+    if (!silent) feature_setMsg(msg, '停止しました。');
+    if (feature_state.activeQrKey === kind) feature_state.activeQrKey = null;
   }
 
-  async function qr_start() {
-    const btnStart = document.getElementById('qr_btnStart');
-    const btnStop = document.getElementById('qr_btnStop');
-    const videoWrap = document.getElementById('qr_videoWrap');
-    const video = document.getElementById('qr_video');
+  function feature_locNormalizeKey(id) {
+    return String(id || '')
+      .trim()
+      .replace(/[ \u3000]/g, '');
+  }
 
-    qr_setMsg('');
-    qr_setResult('-');
+  async function feature_resolveLocationMap(locRaw) {
+    const raw = String(locRaw || '').trim();
+    if (!raw.startsWith('LOC:')) {
+      return { ok: false, message: '場所QRは "LOC:<id>" の形式で読み取ってください。' };
+    }
+    const id = raw.slice(4).trim();
+    const key = feature_locNormalizeKey(id);
+    if (!key) return { ok: false, message: '場所QRのIDが空です。' };
 
-    if (!video || !btnStart || !btnStop || !videoWrap) return;
+    const direct = FEATURE_LOC_DICT[key];
+    if (direct) return { ok: true, url: direct, key };
+
+    const fallbackUrl = `/assets/maps/${encodeURIComponent(id)}.png`;
+    // Existence check (best-effort)
+    try {
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('notfound'));
+        img.src = fallbackUrl;
+      });
+      return { ok: true, url: fallbackUrl, key };
+    } catch {
+      return { ok: false, message: `未登録の場所です: ${id}` };
+    }
+  }
+
+  async function feature_startQr(kind) {
+    const other = kind === 'personal' ? 'location' : 'personal';
+    await feature_stopQr(other, { silent: true });
+
+    const btnStart = document.getElementById(`feature_${kind}_btnStart`);
+    const btnStop = document.getElementById(`feature_${kind}_btnStop`);
+    const wrap = document.getElementById(`feature_${kind}_videoWrap`);
+    const video = document.getElementById(`feature_${kind}_video`);
+    const msg = document.getElementById(`feature_${kind}_msg`);
+
+    if (!btnStart || !btnStop || !wrap || !video) return;
+
+    feature_setMsg(msg, '');
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      qr_setMsg(
+      feature_setMsg(
+        msg,
         'このブラウザはカメラに対応していません。\n※ Safari/Chromeで開いてください（アプリ内ブラウザでは動かない場合があります）。'
       );
       return;
@@ -937,37 +1062,51 @@
 
     const QrScannerLib = window.QrScanner;
     if (!QrScannerLib) {
-      qr_setMsg('QR読み取りライブラリの読み込みに失敗しました。通信状況を確認してください。');
+      feature_setMsg(msg, 'QR読み取りライブラリの読み込みに失敗しました。通信状況を確認してください。');
       return;
     }
 
-    try {
-      await qr_stop({ silent: true });
+    // Worker 404 再発防止（必ず生成前に設定）
+    QrScannerLib.WORKER_PATH = 'https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js';
 
-      // Always start by user gesture only (called from click handler)
+    try {
+      await feature_stopQr(kind, { silent: true });
       btnStart.disabled = true;
       btnStop.disabled = false;
-      videoWrap.classList.remove('hidden');
+      wrap.classList.remove('hidden');
 
-      // Worker path (CDN)
-      QrScannerLib.WORKER_PATH = 'https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js';
+      feature_state.activeQrKey = kind;
 
-      qr_state.lastText = '';
-      qr_state.lastAt = 0;
-
-      qr_state.scanner = new QrScannerLib(
+      feature_state.qr[kind].scanner = new QrScannerLib(
         video,
-        (result) => {
+        async (result) => {
           const text = typeof result === 'string' ? result : (result?.data ?? '');
           const t = String(text || '').trim();
           if (!t) return;
 
-          const now = Date.now();
-          if (t === qr_state.lastText && now - qr_state.lastAt < 1200) return;
+          const c = feature_state.currentCaseId ? feature_getCaseById(feature_state.currentCaseId) : null;
+          if (!c) return;
 
-          qr_state.lastText = t;
-          qr_state.lastAt = now;
-          qr_setResult(t);
+          if (kind === 'personal') {
+            c.personalQrText = t;
+            feature_upsertCase(c);
+            feature_renderDetailMount();
+            return;
+          }
+
+          // location
+          c.locationQrValue = t;
+          c.locationMapResolved = '';
+          feature_upsertCase(c);
+
+          const res = await feature_resolveLocationMap(t);
+          if (res.ok) {
+            c.locationMapResolved = res.url;
+            feature_upsertCase(c);
+          } else {
+            feature_setMsg(msg, res.message);
+          }
+          feature_renderDetailMount();
         },
         {
           preferredCamera: 'environment',
@@ -976,51 +1115,340 @@
         }
       );
 
-      await qr_state.scanner.start();
-      qr_setMsg('カメラを起動しました。QRコードを映してください。');
+      await feature_state.qr[kind].scanner.start();
+      feature_setMsg(msg, 'カメラを起動しました。QRコードを映してください。');
     } catch (err) {
-      await qr_stop({ silent: true });
+      await feature_stopQr(kind, { silent: true });
       btnStart.disabled = false;
       btnStop.disabled = true;
-      videoWrap.classList.add('hidden');
-      qr_setMsg(qr_humanizeError(err));
+      wrap.classList.add('hidden');
+      feature_setMsg(msg, feature_humanizeCameraError(err));
     }
   }
 
-  function qr_init() {
-    const btnStart = document.getElementById('qr_btnStart');
-    const btnStop = document.getElementById('qr_btnStop');
-    const btnOpen = document.getElementById('qr_btnOpen');
-
-    if (!btnStart || !btnStop) return;
-
-    btnStart.addEventListener('click', () => {
-      qr_start();
-    });
-    btnStop.addEventListener('click', () => {
-      qr_stop();
-    });
-
-    btnOpen?.addEventListener('click', () => {
-      const text = document.getElementById('qr_resultText')?.textContent || '';
-      if (!qr_isHttpUrl(text)) return;
-      window.open(String(text).trim(), '_blank', 'noopener');
-    });
-
-    // Stop camera when leaving the page or app goes background
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) qr_stop({ silent: true });
-    });
-    window.addEventListener('pagehide', () => {
-      qr_stop({ silent: true });
-    });
-
-    // Stop when user starts existing flows (home buttons)
-    document.getElementById('btnStartEmergency')?.addEventListener('click', () => qr_stop({ silent: true }));
-    document.getElementById('btnStartUnsure')?.addEventListener('click', () => qr_stop({ silent: true }));
-    document.getElementById('btnAdmin')?.addEventListener('click', () => qr_stop({ silent: true }));
+  function feature_shorten(s, max = 18) {
+    const t = String(s || '');
+    if (t.length <= max) return t;
+    return t.slice(0, max) + '…';
   }
-  // QR SCANNER END
+
+  function feature_buildMailAddon(caseData) {
+    const c = caseData || {};
+    const personal = c.personalQrText ? c.personalQrText : '未設定';
+    const loc = c.locationQrValue ? c.locationQrValue : '未設定';
+    const map = c.locationMapResolved ? c.locationMapResolved : '未設定';
+
+    const meta = Array.isArray(c.attachmentsMeta) ? c.attachmentsMeta : [];
+    const imgs = meta.filter((m) => String(m?.type || '').startsWith('image/'));
+    const vids = meta.filter((m) => String(m?.type || '').startsWith('video/'));
+
+    const listNames = (arr) => arr.slice(0, 5).map((m) => m.name).filter(Boolean).join(', ');
+
+    let addon = '';
+    addon += '\n\n【QR読取情報】\n';
+    addon += `個人情報：${personal}\n`;
+    addon += `場所：${loc}\n`;
+    addon += `地図URL：${map}\n`;
+    addon += '\n【添付情報（※ファイルは添付されません）】\n';
+    addon += `画像：${imgs.length}件${imgs.length ? `（${listNames(imgs)}）` : ''}\n`;
+    addon += `動画：${vids.length}件${vids.length ? `（${listNames(vids)}）` : ''}`;
+    return addon;
+  }
+
+  function feature_refreshMailPreviewUi() {
+    const view = document.getElementById('view-result');
+    if (!view || !view.classList.contains('active')) return;
+
+    const s = getSituation(state.situationId);
+    const action = state.action || s?.defaultAction || 'observe';
+    state.action = action;
+    state.preview = buildMail(action);
+
+    $('#mailToPreview').textContent = (state.preview.to || []).join(', ') || '-';
+    $('#mailSubjectPreview').textContent = state.preview.subject || '-';
+    $('#mailBodyPreview').textContent = state.preview.body || '-';
+  }
+
+  function feature_renderDetailMount() {
+    const mountResult = document.getElementById('featureMountResult');
+    const mountEmergency = document.getElementById('featureMountEmergency');
+
+    // Prevent duplicated IDs across views by keeping only one rendered instance
+    if (mountResult) mountResult.innerHTML = '';
+    if (mountEmergency) mountEmergency.innerHTML = '';
+
+    const isResult = !!mountResult?.closest('.view')?.classList.contains('active');
+    const isEmergency = !!mountEmergency?.closest('.view')?.classList.contains('active');
+    const activeMount = isResult ? mountResult : isEmergency ? mountEmergency : null;
+    if (!activeMount) return;
+
+    const flowType = isEmergency ? '緊急事態' : '判断に迷う';
+    const c = feature_ensureCurrentCase(flowType);
+
+    activeMount.innerHTML = `
+      <div class="card feature-card" aria-label="個人情報QR">
+        <div class="card-title">個人情報QR</div>
+        <div class="feature-actions">
+          <button id="feature_personal_btnStart" class="btn btn-primary feature-btn" type="button">開始</button>
+          <button id="feature_personal_btnStop" class="btn btn-secondary feature-btn" type="button" disabled>停止</button>
+        </div>
+        <div id="feature_personal_videoWrap" class="feature-video-wrap hidden">
+          <video id="feature_personal_video" class="feature-video" muted playsinline></video>
+        </div>
+        <div class="feature-result">
+          <div class="small">読み取り結果</div>
+          <div class="mono feature-result-text">${escapeHtml(c.personalQrText || '-')}</div>
+        </div>
+        <p id="feature_personal_msg" class="small"></p>
+      </div>
+
+      <div class="card feature-card" aria-label="場所QR">
+        <div class="card-title">場所QR</div>
+        <div class="feature-actions">
+          <button id="feature_location_btnStart" class="btn btn-primary feature-btn" type="button">開始</button>
+          <button id="feature_location_btnStop" class="btn btn-secondary feature-btn" type="button" disabled>停止</button>
+        </div>
+        <div id="feature_location_videoWrap" class="feature-video-wrap hidden">
+          <video id="feature_location_video" class="feature-video" muted playsinline></video>
+        </div>
+        <div class="feature-result">
+          <div class="small">読み取り結果</div>
+          <div class="mono feature-result-text">${escapeHtml(c.locationQrValue || '-')}</div>
+          <div class="small">地図</div>
+          <div class="mono feature-result-text">${escapeHtml(c.locationMapResolved || '-')}</div>
+          <div class="small">位置</div>
+          <div class="mono feature-result-text">${c.mapTap ? escapeHtml(`${Math.round(c.mapTap.x * 100)}%, ${Math.round(c.mapTap.y * 100)}%`) : '-'}</div>
+          <button id="feature_btnToMap" class="btn btn-primary feature-btn ${c.locationMapResolved ? '' : 'hidden'}" type="button">地図へ</button>
+        </div>
+        <p id="feature_location_msg" class="small"></p>
+      </div>
+
+      <div class="card feature-card" aria-label="名前検索">
+        <div class="card-title">名前検索</div>
+        <label class="field">
+          <span>名前</span>
+          <input id="feature_nameInput" list="feature_nameList" type="text" placeholder="名前を入力" value="${escapeHtml(c.selectedName || '')}" />
+          <datalist id="feature_nameList">
+            ${FEATURE_NAME_CANDIDATES.map((n) => `<option value="${escapeHtml(n)}"></option>`).join('')}
+          </datalist>
+        </label>
+        <button id="feature_btnNameConfirm" class="btn btn-primary feature-btn" type="button">検索（確定）</button>
+        <p class="small">確定: <span class="mono">${escapeHtml(c.selectedName || '-')}</span></p>
+      </div>
+
+      <div class="card feature-card" aria-label="添付（選択）">
+        <div class="card-title">添付（選択）</div>
+        <label class="btn btn-secondary feature-file-btn" for="feature_fileInput">画像/動画を追加</label>
+        <input id="feature_fileInput" type="file" accept="image/*,video/*" capture multiple />
+        <div id="feature_attachSummary" class="small"></div>
+        <div id="feature_attachList" class="small"></div>
+        <p class="small">※ファイルはメールに添付されません。再読み込みすると再選択が必要です</p>
+      </div>
+    `;
+
+    // wire
+    document.getElementById('feature_personal_btnStart')?.addEventListener('click', () => feature_startQr('personal'));
+    document.getElementById('feature_personal_btnStop')?.addEventListener('click', () => feature_stopQr('personal'));
+    document.getElementById('feature_location_btnStart')?.addEventListener('click', () => feature_startQr('location'));
+    document.getElementById('feature_location_btnStop')?.addEventListener('click', () => feature_stopQr('location'));
+
+    document.getElementById('feature_btnToMap')?.addEventListener('click', () => {
+      feature_stopAllQr({ silent: true });
+      feature_renderMapView();
+      nav.show('view-map');
+    });
+
+    document.getElementById('feature_btnNameConfirm')?.addEventListener('click', () => {
+      const input = document.getElementById('feature_nameInput');
+      const v = String(input?.value || '').trim();
+      c.selectedName = v;
+      feature_upsertCase(c);
+      feature_renderDetailMount();
+    });
+
+    const fileInput = document.getElementById('feature_fileInput');
+    fileInput?.addEventListener('change', () => {
+      const files = Array.from(fileInput.files || []);
+      const now = new Date().toISOString();
+      const metas = files.map((f) => ({ name: f.name, type: f.type, size: f.size, selectedAt: now }));
+      c.attachmentsMeta = Array.isArray(c.attachmentsMeta) ? c.attachmentsMeta.concat(metas) : metas;
+      feature_upsertCase(c);
+      fileInput.value = '';
+      feature_refreshMailPreviewUi();
+      feature_renderDetailMount();
+    });
+
+    feature_renderAttachmentsUi(c);
+    feature_refreshMailPreviewUi();
+  }
+
+  function feature_renderAttachmentsUi(caseData) {
+    const c = caseData || {};
+    const meta = Array.isArray(c.attachmentsMeta) ? c.attachmentsMeta : [];
+    const summary = document.getElementById('feature_attachSummary');
+    const list = document.getElementById('feature_attachList');
+    if (!summary || !list) return;
+
+    const imgs = meta.filter((m) => String(m?.type || '').startsWith('image/'));
+    const vids = meta.filter((m) => String(m?.type || '').startsWith('video/'));
+
+    summary.textContent = `画像${imgs.length}件 / 動画${vids.length}件`;
+
+    if (!meta.length) {
+      list.textContent = '選択済みファイルはありません。';
+      return;
+    }
+
+    const show = meta.slice(0, 10);
+    list.innerHTML = show
+      .map((m, i) => {
+        const idx = i;
+        return `
+          <div class="feature-attach-row">
+            <span class="mono">${escapeHtml(m.name || 'file')}</span>
+            <button type="button" class="btn btn-secondary feature-attach-del" data-idx="${idx}">削除</button>
+          </div>
+        `;
+      })
+      .join('');
+
+    list.querySelectorAll('.feature-attach-del').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-idx'));
+        const next = feature_getCaseById(feature_state.currentCaseId);
+        if (!next) return;
+        const arr = Array.isArray(next.attachmentsMeta) ? next.attachmentsMeta.slice() : [];
+        arr.splice(idx, 1);
+        next.attachmentsMeta = arr;
+        feature_upsertCase(next);
+        feature_renderDetailMount();
+      });
+    });
+  }
+
+  function feature_renderCasesView() {
+    const wrap = document.getElementById('featureCasesList');
+    if (!wrap) return;
+
+    const cases = feature_loadCases().slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    if (!cases.length) {
+      wrap.innerHTML = '<div class="small">案件履歴はありません。</div>';
+      return;
+    }
+
+    wrap.innerHTML = '';
+    for (const c of cases) {
+      const row = document.createElement('div');
+      row.className = 'card feature-case-row';
+      const hasAttach = Array.isArray(c.attachmentsMeta) && c.attachmentsMeta.length > 0;
+
+      row.innerHTML = `
+        <div class="feature-case-main">
+          <div class="feature-case-title"><strong>${escapeHtml(c.symptomName || '-')}</strong></div>
+          <div class="small">
+            ${escapeHtml(c.createdAt || '')}<br/>
+            種別: ${escapeHtml(c.flowType || '-')}
+          </div>
+          <div class="small">個人: ${escapeHtml(feature_shorten(c.personalQrText || '未設定'))}</div>
+          <div class="small">場所: ${escapeHtml(feature_shorten(c.locationQrValue || '未設定'))}</div>
+          <div class="small">位置: ${c.mapTap ? escapeHtml('設定済み') : escapeHtml('未設定')}</div>
+          <div class="small">添付: ${hasAttach ? 'あり' : 'なし'}</div>
+        </div>
+        <div class="feature-case-side">
+          <label class="field">
+            <span>ステータス</span>
+            <select class="feature-case-status" data-id="${escapeHtml(c.id)}">
+              ${['未対応', '対応中', '対応済み']
+                .map((s) => `<option value="${escapeHtml(s)}" ${c.status === s ? 'selected' : ''}>${escapeHtml(s)}</option>`)
+                .join('')}
+            </select>
+          </label>
+          <label class="field">
+            <span>担当者</span>
+            <input class="feature-case-assignee" data-id="${escapeHtml(c.id)}" type="text" value="${escapeHtml(c.assignee || '')}" placeholder="担当者名" />
+          </label>
+        </div>
+      `;
+      wrap.appendChild(row);
+    }
+
+    wrap.querySelectorAll('.feature-case-status').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const id = sel.getAttribute('data-id');
+        const c = feature_getCaseById(id);
+        if (!c) return;
+        c.status = sel.value;
+        feature_upsertCase(c);
+      });
+    });
+    wrap.querySelectorAll('.feature-case-assignee').forEach((inp) => {
+      inp.addEventListener('input', () => {
+        const id = inp.getAttribute('data-id');
+        const c = feature_getCaseById(id);
+        if (!c) return;
+        c.assignee = inp.value;
+        feature_upsertCase(c);
+      });
+    });
+  }
+
+  function feature_renderMapView() {
+    const wrap = document.getElementById('featureMapWrap');
+    const c = feature_state.currentCaseId ? feature_getCaseById(feature_state.currentCaseId) : null;
+    if (!wrap || !c) return;
+
+    if (!c.locationMapResolved) {
+      wrap.innerHTML = '<div class="card"><div class="card-title">地図</div><p class="small">地図が未解決です。場所QRを読み取ってください。</p></div>';
+      return;
+    }
+
+    const tap = c.mapTap;
+    const markerStyle = tap ? `left:${tap.x * 100}%; top:${tap.y * 100}%;` : '';
+
+    wrap.innerHTML = `
+      <div class="card feature-card">
+        <div class="card-title">施設内地図</div>
+        <p class="small">地図をタップして位置を選択してください。</p>
+        <div id="feature_mapArea" class="feature-map-area">
+          <img id="feature_mapImg" class="feature-map-img" src="${escapeHtml(c.locationMapResolved)}" alt="施設内地図" />
+          <div id="feature_mapMarker" class="feature-map-marker ${tap ? '' : 'hidden'}" style="${markerStyle}"></div>
+        </div>
+        <button id="feature_btnMapConfirm" class="btn btn-primary feature-btn" type="button">確定</button>
+      </div>
+    `;
+
+    const area = document.getElementById('feature_mapArea');
+    const img = document.getElementById('feature_mapImg');
+    const marker = document.getElementById('feature_mapMarker');
+
+    area?.addEventListener('click', (e) => {
+      const rect = area.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+      feature_state.mapTempTap = { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
+      if (marker) {
+        marker.classList.remove('hidden');
+        marker.style.left = feature_state.mapTempTap.x * 100 + '%';
+        marker.style.top = feature_state.mapTempTap.y * 100 + '%';
+      }
+    });
+
+    img?.addEventListener('error', () => {
+      wrap.innerHTML = '<div class="card"><div class="card-title">地図</div><p class="small">地図画像の読み込みに失敗しました。場所IDが未登録の可能性があります。</p></div>';
+    });
+
+    document.getElementById('feature_btnMapConfirm')?.addEventListener('click', () => {
+      const next = feature_getCaseById(feature_state.currentCaseId);
+      if (!next) return;
+      if (!feature_state.mapTempTap) return;
+      next.mapTap = feature_state.mapTempTap;
+      feature_upsertCase(next);
+      feature_state.mapTempTap = null;
+      nav.back();
+      feature_renderDetailMount();
+    });
+  }
+  // FEATURE END
 
   /** =========================
    *  Admin (password-protected)
@@ -1365,6 +1793,37 @@
       saveSession({ ...state, nav: nav.stack });
     });
 
+    // FEATURE START
+    document.getElementById('btnStartEmergency')?.addEventListener('click', () => {
+      feature_state.currentCaseId = null;
+      feature_stopAllQr({ silent: true });
+    });
+    document.getElementById('btnStartUnsure')?.addEventListener('click', () => {
+      feature_state.currentCaseId = null;
+      feature_stopAllQr({ silent: true });
+    });
+    document.getElementById('btnRestartGlobal')?.addEventListener('click', () => {
+      feature_state.currentCaseId = null;
+      feature_stopAllQr({ silent: true });
+    });
+    document.getElementById('btnBack')?.addEventListener('click', () => {
+      feature_stopAllQr({ silent: true });
+    });
+
+    document.getElementById('btnCases')?.addEventListener('click', () => {
+      feature_stopAllQr({ silent: true });
+      feature_renderCasesView();
+      nav.show('view-cases');
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) feature_stopAllQr({ silent: true });
+    });
+    window.addEventListener('pagehide', () => {
+      feature_stopAllQr({ silent: true });
+    });
+    // FEATURE END
+
     $('#btnBodyNext').addEventListener('click', () => {
       if (!state.bodyPartId) return;
 
@@ -1558,9 +2017,5 @@
 
     // If first time, show admin set screen on admin view when opened
     admin.initGate();
-
-    // QR SCANNER START
-    qr_init();
-    // QR SCANNER END
   });
 })();
