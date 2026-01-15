@@ -766,7 +766,8 @@
     // FEATURE START
     try {
       const caseData = feature_state.currentCaseId ? feature_getCaseById(feature_state.currentCaseId) : null;
-      body = body + feature_buildMailAddon(caseData);
+      feature_state.lastMailTime = time;
+      body = buildMailBody(caseData);
     } catch {
       // ignore
     }
@@ -864,6 +865,8 @@
   const feature_state = {
     currentCaseId: null,
     activeQrKey: null, // 'personal' | 'location' | null
+    sessionId: String(Date.now()),
+    lastMailTime: null,
     qr: {
       personal: { scanner: null },
       location: { scanner: null },
@@ -882,6 +885,70 @@
   const FEATURE_LOC_DICT = {
     機械ヤード: '/assets/maps/機械ヤード.png',
   };
+
+  const BASE_ORIGIN = 'https://new-app-j02t.onrender.com';
+
+  function toAbsoluteUrl(pathOrUrl) {
+    if (!pathOrUrl) return '';
+    if (pathOrUrl.startsWith('http')) return pathOrUrl;
+    return BASE_ORIGIN.replace(/\/$/, '') + '/' + pathOrUrl.replace(/^\//, '');
+  }
+
+  function buildMailBody(caseData) {
+    const s = getSituation(state.situationId);
+    const c = getCompany(state.companyId);
+    const p = getPerson(state.personId);
+    const bp = getBodyPart(state.bodyPartId);
+
+    const time = feature_state.lastMailTime || nowIsoLocal();
+    const part = bp ? bp.label : '';
+    const detail = state.detailNote || '';
+
+    const cd = caseData || {};
+    const personal = cd.personalQrText ? cd.personalQrText : '未設定';
+    const loc = cd.locationQrValue ? cd.locationQrValue : '未設定';
+
+    const abs = cd.locationMapResolved ? toAbsoluteUrl(cd.locationMapResolved) : '';
+    const mapUrl = abs ? encodeURI(abs) : '';
+    const map = mapUrl ? mapUrl : '未設定';
+
+    const metaAll = Array.isArray(cd.attachmentsMeta) ? cd.attachmentsMeta : [];
+    const meta = metaAll.filter((m) => m && m.sessionId === feature_state.sessionId);
+    const imgs = meta.filter((m) => String(m?.type || '').startsWith('image/'));
+    const vids = meta.filter((m) => String(m?.type || '').startsWith('video/'));
+
+    const listNames = (arr) => arr.slice(0, 5).map((m) => m.name).filter(Boolean).join(', ');
+
+    const flowType = cd.flowType || '未設定';
+    const symptomName = cd.symptomName || s?.label || '未設定';
+    const caseStatus = cd.status || '未設定';
+    const assignee = cd.assignee ? cd.assignee : '';
+    const action = state.action || (s?.defaultAction || 'observe');
+    const actionLabel = action === 'emergency' ? '緊急要請' : action === 'observe' ? '様子見' : String(action);
+
+    let body = '';
+    body += `状況：${s?.label || '未設定'}\n`;
+    body += `所属：${c?.name || '未設定'}\n`;
+    body += `対象者：${p?.name || '未設定'}\n`;
+    body += `発生時刻：${time}\n`;
+    body += `症状：${symptomName}\n`;
+    if (part) body += `部位：${part}\n`;
+    body += `対応方針：${actionLabel}\n`;
+    body += `対応状況：${caseStatus}${assignee ? `（担当：${assignee}）` : ''}\n`;
+    body += `種別：${flowType}\n`;
+    body += `追記：${detail || '（追記なし）'}\n`;
+
+    body += `\n【QR読取情報】\n`;
+    body += `個人情報：${personal}\n`;
+    body += `場所：${loc}\n`;
+    body += `地図URL：${map}\n`;
+
+    body += `\n【添付情報（※ファイルは添付されません）】\n`;
+    body += `画像：${imgs.length}件${imgs.length ? `（${listNames(imgs)}）` : ''}\n`;
+    body += `動画：${vids.length}件${vids.length ? `（${listNames(vids)}）` : ''}\n`;
+    body += `\n※ファイルはメールに添付されません（本文に件数/名前のみ記載）。再読み込み後は再選択が必要です。`;
+    return body;
+  }
 
   function feature_loadCases() {
     try {
@@ -1132,29 +1199,6 @@
     return t.slice(0, max) + '…';
   }
 
-  function feature_buildMailAddon(caseData) {
-    const c = caseData || {};
-    const personal = c.personalQrText ? c.personalQrText : '未設定';
-    const loc = c.locationQrValue ? c.locationQrValue : '未設定';
-    const map = c.locationMapResolved ? c.locationMapResolved : '未設定';
-
-    const meta = Array.isArray(c.attachmentsMeta) ? c.attachmentsMeta : [];
-    const imgs = meta.filter((m) => String(m?.type || '').startsWith('image/'));
-    const vids = meta.filter((m) => String(m?.type || '').startsWith('video/'));
-
-    const listNames = (arr) => arr.slice(0, 5).map((m) => m.name).filter(Boolean).join(', ');
-
-    let addon = '';
-    addon += '\n\n【QR読取情報】\n';
-    addon += `個人情報：${personal}\n`;
-    addon += `場所：${loc}\n`;
-    addon += `地図URL：${map}\n`;
-    addon += '\n【添付情報（※ファイルは添付されません）】\n';
-    addon += `画像：${imgs.length}件${imgs.length ? `（${listNames(imgs)}）` : ''}\n`;
-    addon += `動画：${vids.length}件${vids.length ? `（${listNames(vids)}）` : ''}`;
-    return addon;
-  }
-
   function feature_refreshMailPreviewUi() {
     const view = document.getElementById('view-result');
     if (!view || !view.classList.contains('active')) return;
@@ -1176,6 +1220,8 @@
     // Prevent duplicated IDs across views by keeping only one rendered instance
     if (mountResult) mountResult.innerHTML = '';
     if (mountEmergency) mountEmergency.innerHTML = '';
+
+    feature_clearMailAttachMounts();
 
     const isResult = !!mountResult?.closest('.view')?.classList.contains('active');
     const isEmergency = !!mountEmergency?.closest('.view')?.classList.contains('active');
@@ -1235,15 +1281,6 @@
         <button id="feature_btnNameConfirm" class="btn btn-primary feature-btn" type="button">検索（確定）</button>
         <p class="small">確定: <span class="mono">${escapeHtml(c.selectedName || '-')}</span></p>
       </div>
-
-      <div class="card feature-card" aria-label="添付（選択）">
-        <div class="card-title">添付（選択）</div>
-        <label class="btn btn-secondary feature-file-btn" for="feature_fileInput">画像/動画を追加</label>
-        <input id="feature_fileInput" type="file" accept="image/*,video/*" capture multiple />
-        <div id="feature_attachSummary" class="small"></div>
-        <div id="feature_attachList" class="small"></div>
-        <p class="small">※ファイルはメールに添付されません。再読み込みすると再選択が必要です</p>
-      </div>
     `;
 
     // wire
@@ -1266,25 +1303,94 @@
       feature_renderDetailMount();
     });
 
+    feature_renderMailAttachmentsComposer(c);
+    feature_refreshMailPreviewUi();
+  }
+
+  function feature_clearMailAttachMounts() {
+    const a = document.getElementById('featureMailAttachMountResult');
+    const b = document.getElementById('featureMailAttachMountEmergency');
+    if (a) a.innerHTML = '';
+    if (b) b.innerHTML = '';
+  }
+
+  function feature_getActiveMailAttachMount() {
+    const viewResult = document.getElementById('view-result');
+    const viewEmergency = document.getElementById('view-emergency');
+
+    if (viewResult && viewResult.classList.contains('active')) {
+      let mount = document.getElementById('featureMailAttachMountResult');
+      if (!mount) {
+        const mail = viewResult.querySelector('.mail-preview');
+        const actions = mail?.querySelector('.mail-preview-actions');
+        mount = document.createElement('div');
+        mount.id = 'featureMailAttachMountResult';
+        if (mail && actions) mail.insertBefore(mount, actions);
+        else if (mail) mail.appendChild(mount);
+      }
+      return mount;
+    }
+
+    if (viewEmergency && viewEmergency.classList.contains('active')) {
+      let mount = document.getElementById('featureMailAttachMountEmergency');
+      if (!mount) {
+        const actions = viewEmergency.querySelector('.actions');
+        mount = document.createElement('div');
+        mount.id = 'featureMailAttachMountEmergency';
+        if (actions) actions.insertAdjacentElement('afterend', mount);
+        else viewEmergency.appendChild(mount);
+      }
+      return mount;
+    }
+
+    return null;
+  }
+
+  function feature_renderMailAttachmentsComposer(caseData) {
+    const mount = feature_getActiveMailAttachMount();
+    if (!mount) return;
+
+    const c = caseData || {};
+    mount.innerHTML = `
+      <div class="card feature-card" aria-label="画像＆撮影を追加">
+        <div class="card-title">画像＆撮影を追加</div>
+        <label class="btn btn-secondary feature-file-btn" for="feature_fileInput">画像＆撮影を追加</label>
+        <input id="feature_fileInput" type="file" accept="image/*,video/*" capture multiple />
+        <div id="feature_attachSummary" class="small"></div>
+        <div id="feature_attachList" class="small"></div>
+        <p class="small">※ファイルはメールに添付されません（本文に件数/名前のみ記載）。再読み込み後は再選択が必要です。</p>
+      </div>
+    `;
+
     const fileInput = document.getElementById('feature_fileInput');
     fileInput?.addEventListener('change', () => {
       const files = Array.from(fileInput.files || []);
       const now = new Date().toISOString();
-      const metas = files.map((f) => ({ name: f.name, type: f.type, size: f.size, selectedAt: now }));
-      c.attachmentsMeta = Array.isArray(c.attachmentsMeta) ? c.attachmentsMeta.concat(metas) : metas;
-      feature_upsertCase(c);
+      const metas = files.map((f) => ({
+        name: f.name,
+        type: f.type,
+        size: f.size,
+        selectedAt: now,
+        sessionId: feature_state.sessionId,
+      }));
+
+      const next = feature_state.currentCaseId ? feature_getCaseById(feature_state.currentCaseId) : null;
+      if (!next) return;
+
+      next.attachmentsMeta = Array.isArray(next.attachmentsMeta) ? next.attachmentsMeta.concat(metas) : metas;
+      feature_upsertCase(next);
       fileInput.value = '';
       feature_refreshMailPreviewUi();
       feature_renderDetailMount();
     });
 
     feature_renderAttachmentsUi(c);
-    feature_refreshMailPreviewUi();
   }
 
   function feature_renderAttachmentsUi(caseData) {
     const c = caseData || {};
-    const meta = Array.isArray(c.attachmentsMeta) ? c.attachmentsMeta : [];
+    const metaAll = Array.isArray(c.attachmentsMeta) ? c.attachmentsMeta : [];
+    const meta = metaAll.filter((m) => m && m.sessionId === feature_state.sessionId);
     const summary = document.getElementById('feature_attachSummary');
     const list = document.getElementById('feature_attachList');
     if (!summary || !list) return;
@@ -1317,9 +1423,10 @@
         const idx = Number(btn.getAttribute('data-idx'));
         const next = feature_getCaseById(feature_state.currentCaseId);
         if (!next) return;
-        const arr = Array.isArray(next.attachmentsMeta) ? next.attachmentsMeta.slice() : [];
+        const arrAll = Array.isArray(next.attachmentsMeta) ? next.attachmentsMeta.slice() : [];
+        const arr = arrAll.filter((m) => m && m.sessionId === feature_state.sessionId);
         arr.splice(idx, 1);
-        next.attachmentsMeta = arr;
+        next.attachmentsMeta = arrAll.filter((m) => !m || m.sessionId !== feature_state.sessionId).concat(arr);
         feature_upsertCase(next);
         feature_renderDetailMount();
       });
@@ -1340,7 +1447,8 @@
     for (const c of cases) {
       const row = document.createElement('div');
       row.className = 'card feature-case-row';
-      const hasAttach = Array.isArray(c.attachmentsMeta) && c.attachmentsMeta.length > 0;
+      const hasAttach =
+        Array.isArray(c.attachmentsMeta) && c.attachmentsMeta.some((m) => m && m.sessionId === feature_state.sessionId);
 
       row.innerHTML = `
         <div class="feature-case-main">
