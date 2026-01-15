@@ -28,28 +28,6 @@
     <main class="main">
       <!-- Home -->
       <section id="view-home" class="view active" aria-label="ホーム">
-        <!-- QR SCANNER START -->
-        <div class="card qr-card" aria-label="QRコード読み取り">
-          <div class="card-title">QRコード読み取り</div>
-
-          <div class="qr-actions">
-            <button id="qr_btnStart" class="btn btn-primary qr-btn" type="button">開始</button>
-            <button id="qr_btnStop" class="btn btn-secondary qr-btn" type="button" disabled>停止</button>
-          </div>
-
-          <div id="qr_videoWrap" class="qr-video-wrap hidden">
-            <video id="qr_video" class="qr-video" muted playsinline></video>
-          </div>
-
-          <div class="qr-result">
-            <div class="small">読み取り結果</div>
-            <div id="qr_resultText" class="mono qr-result-text">-</div>
-            <button id="qr_btnOpen" class="btn btn-primary qr-btn hidden" type="button">開く</button>
-          </div>
-
-          <p id="qr_msg" class="small"></p>
-        </div>
-        <!-- QR SCANNER END -->
         <div class="hero">
           <div class="mascot" aria-hidden="true">
             <!-- Simple "emergency character" (lifebuoy + heart) -->
@@ -85,6 +63,12 @@
         </div>
 
         <div class="home-footer">
+          <!-- FEATURE START -->
+          <button id="btnCases" class="link-btn" type="button" aria-label="対応状況">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            <span>対応状況</span>
+          </button>
+          <!-- FEATURE END -->
           <button id="btnAdmin" class="link-btn" type="button" aria-label="管理画面">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14,12.94c0.04-0.31 0.06-0.63 0.06-0.94 0-0.31-0.02-0.63-0.06-0.94l2.03-1.58c0.18-0.14 0.23-0.41 0.12-0.61l-1.92-3.32c-0.11-0.2-0.35-0.28-0.56-0.2l-2.39 0.96c-0.5-0.38-1.04-0.7-1.63-0.94L14.4,2.5C14.37,2.22 14.13,2 13.85,2h-3.7c-0.28,0-0.52,0.22-0.55,0.5L9.24,5.04c-0.59,0.24-1.13,0.56-1.63,0.94L5.22,5.02c-0.21-0.08-0.45,0-0.56,0.2L2.74,8.54c-0.11,0.2-0.06,0.46,0.12,0.61l2.03,1.58C4.85,11.04 4.83,11.36 4.83,11.67c0,0.31 0.02,0.63 0.06,0.94L2.86,14.19c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.11,0.2 0.35,0.28 0.56,0.2l2.39-0.96c0.5,0.38 1.04,0.7 1.63,0.94l0.36,2.54c0.03,0.28 0.27,0.5 0.55,0.5h3.7c0.28,0 0.52-0.22 0.55-0.5l0.36-2.54c0.59-0.24 1.13-0.56 1.63-0.94l2.39 0.96c0.21,0.08 0.45,0 0.56-0.2l1.92-3.32c0.11-0.2 0.06-0.46-0.12-0.61L19.14,12.94z M12,15.5c-1.93,0-3.5-1.57-3.5-3.5S10.07,8.5,12,8.5s3.5,1.57,3.5,3.5S13.93,15.5,12,15.5z"/></svg>
             <span>管理</span>
@@ -179,6 +163,10 @@
       </button>
     </div>
 
+    <!-- FEATURE START -->
+    <div id="featureMountEmergency"></div>
+    <!-- FEATURE END -->
+
     <p class="small muted">
       ※ 送信内容のプレビューは表示しません（緊急事態の想定）。
     </p>
@@ -206,6 +194,10 @@
             様子を見る
           </button>
         </div>
+
+        <!-- FEATURE START -->
+        <div id="featureMountResult"></div>
+        <!-- FEATURE END -->
 
         <div class="mail-preview">
           <div class="mail-preview-title">送信内容（プレビュー）</div>
@@ -359,14 +351,26 @@
         </div>
       </section>
 
+      <!-- FEATURE START -->
+      <section id="view-cases" class="view" aria-label="対応状況">
+        <h2>対応状況</h2>
+        <div id="featureCasesList" class="list" role="list"></div>
+      </section>
+
+      <section id="view-map" class="view" aria-label="施設内地図">
+        <h2>施設内地図</h2>
+        <div id="featureMapWrap"></div>
+      </section>
+      <!-- FEATURE END -->
+
       <!-- Toast -->
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </main>
   </div>
 
-  <!-- QR SCANNER START -->
-  <script src="https://cdn.jsdelivr.net/npm/qr-scanner@1.4.2/qr-scanner.umd.min.js" crossorigin="anonymous"></script>
-  <!-- QR SCANNER END -->
+  <!-- FEATURE START -->
+  <script src="https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js" crossorigin="anonymous"></script>
+  <!-- FEATURE END -->
   <script src="script.js"></script>
 </body>
 </html>
